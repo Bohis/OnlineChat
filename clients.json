@@ -1,0 +1,12 @@
+{
+    "clients": [
+        {
+            "login": "test_login1",
+            "password": "password1"
+        },
+        {
+            "login": "test_login2",
+            "password": "password2"
+        }
+    ]
+}
