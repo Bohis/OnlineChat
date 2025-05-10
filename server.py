@@ -1,38 +1,27 @@
 import socket
 import threading
-import json
-import os
 from client_data import Client
-
-PATH_CONFIG = os.path.join(os.path.dirname(__file__), "config.json")
-PATH_CLIENTS = os.path.join(os.path.dirname(__file__), "clients.json")
-
-def load_data_config(path:str) -> tuple[str, str]:
-    with open(path, "r", encoding="utf-8") as jsonFile:
-        data = json.load(jsonFile)
-        return data["host_ip"], int(data["port"])
-    
-    return None
-
-def load_data_clients(path:str) -> list[Client]:
-    with open(path, "r", encoding="utf-8") as jsonFile:
-        data = json.load(jsonFile)
-        client_data = [Client(data["login"], data["password"]) for data in  data["clients"]]
-        
-        return client_data
-    
-    return None
+from config import *
 
 ip_host, port = load_data_config(PATH_CONFIG)
-clients_data = load_data_clients(PATH_CLIENTS)
+clients_data:dict[str, Client] = {client.login:client for client in load_data_clients(PATH_CLIENTS)} 
 
 lock = threading.Lock()
 
-clients_data = {client.login:client for client in clients_data}
-authorized_clients = {}
-clients_now = []
+clients_socket = []
 
 theard_list = []
+
+def disconnect_handle(connection_socket: socket.socket, addres: str):
+    print(f"[-] disconnect {addres}")
+        
+    with lock:
+        clients_socket.remove(connection_socket)
+        
+    connection_socket.close()
+
+def check_authorized(login: str, password: str) -> bool:
+    return login in clients_data and clients_data[login].password == password
 
 def handle_client(connection_socket: socket.socket, addres:str):
     print(f"[+] client try connect {addres}")
@@ -41,28 +30,25 @@ def handle_client(connection_socket: socket.socket, addres:str):
         try:
             auth_data += connection_socket.recv(1024).decode("utf-8")
             if auth_data.endswith("|"):
-                auth_data = auth_data.replace("|", "")
-                break
+                auth_data = auth_data[:-1]
+                
+                login, password = auth_data.split("\n")
+                
+                if check_authorized(login, password):
+                    translate_meassage(connection_socket, f"COMMAND:{ERROR_AUTHORIZE}")
+                    print(f"[-] client {addres} input error login and password")
+                else:
+                    translate_meassage(connection_socket, f"COMMAND:{SUCCES_AUTHORIZE}")
+                    print(f"[-] client {addres} authorized")
+                    client = clients_data[login]
+                    with lock:
+                        client.ip = addres
+                        client.socket_client = connection_socket
+                    break
+                
         except BaseException as error:
             print(f"[error] error input {error}")
-            break
-    
-    auth_data = auth_data.split("\n")
-    
-    if not(len(auth_data) == 2 and auth_data[0] in clients_data and clients_data[auth_data[0]].password == auth_data[1]):
-        print(f"[-] disconnect {addres}")
-        
-        with lock:
-            clients_now.remove(connection_socket)
-            
-        connection_socket.close()
-        return
-    
-    print(f"[-] client {addres} authorized")
-    client = clients_data[auth_data[0]]
-    with lock:
-        client.ip = addres
-        authorized_clients[addres] = connection_socket
+            translate_meassage(connection_socket, "authorized error. Repeat input")
     
     while True:
         data = ""
@@ -70,29 +56,27 @@ def handle_client(connection_socket: socket.socket, addres:str):
             try:
                 data += connection_socket.recv(1024).decode("utf-8")
                 if data.endswith("|"):
-                    data = data.replace("|", "")
+                    data = data[:-1]
                     print(f"[+] accept message {data}")
                     break
             except:
-                print(f"[-] disconnect {addres}")
-                
-                with lock:
-                    clients_now.remove(connection_socket)
-                    authorized_clients.pop(client.ip)
-                    
-                connection_socket.close()
+                disconnect_handle(connection_socket, addres)
                 return 
         
-        
         from_client, to_client, message = data.split("\n")
-        print(authorized_clients)
-        print(clients_data[to_client].ip)
-        print(authorized_clients[clients_data[to_client].ip])
-        translate_meassage(authorized_clients[clients_data[to_client].ip], f"{from_client}: {message}")
-        
+        send_mesage_from_client_to_client(clients_data.get(from_client), clients_data.get(to_client), message)
+
+def send_mesage_from_client_to_client(from_client:Client, to_client:Client, message:str):
+    if to_client in clients_data:
+        translate_meassage(clients_data[to_client].socket_client, f"{from_client}: {message}")
+        translate_meassage(clients_data[from_client].socket_client, f"COMMAND:{SUCCES_SEND}")
+    else:
+        translate_meassage(clients_data[from_client].socket_client, f"COMMAND:{ERROR_SEND}")
+        print("[error] user not found")
+
 def translate_meassage(to_client:socket.socket, message:str):
     to_client.send(message.encode())
-        
+
 def start_server():
     socket_chat = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     socket_chat.bind((ip_host, port))
@@ -101,7 +85,7 @@ def start_server():
     
     while True:
         connection_socket, addres = socket_chat.accept()
-        clients_now.append(connection_socket)
+        clients_socket.append(connection_socket)
         thread = threading.Thread(target = handle_client, args= (connection_socket, addres))
         thread.start()
         theard_list.append(thread)
