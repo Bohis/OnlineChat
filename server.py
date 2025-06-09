@@ -38,20 +38,20 @@ def handle_client(connection_socket: socket.socket, addres:str):
                 login, password = auth_data.split("\n")
                 
                 if authorize_handle.check_client_login_and_password(login, password):
-                    message_router.route(connection_socket, f"COMMAND:{ERROR_AUTHORIZE}")
-                    print(f"[-] client {addres} wrong login or password")
-                else:
-                    message_router.route(connection_socket, f"COMMAND:{SUCCES_AUTHORIZE}")
+                    message_router.route_callback_to_socket(connection_socket, f"COMMAND:{SUCCES_AUTHORIZE}")
                     print(f"[+] client {addres} authorized")
                     client = clients_data[login]
                     with lock:
                         client.ip = addres
                         client.socket_client = connection_socket
                     break
+                else:
+                    message_router.route_callback_to_socket(connection_socket, f"COMMAND:{ERROR_AUTHORIZE}")
+                    print(f"[-] client {addres} wrong login or password")
                 
         except BaseException as error:
             print(f"[error] error input {error}")
-            message_router.route(connection_socket, "authorized error. Repeat input")
+            message_router.route_callback_to_socket(connection_socket, "authorized error. Repeat input")
             
     
     while True:
@@ -71,11 +71,11 @@ def handle_client(connection_socket: socket.socket, addres:str):
         send_mesage_from_client_to_client(clients_data.get(from_client), clients_data.get(to_client), message)
 
 def send_mesage_from_client_to_client(from_client:Client, to_client:Client, message:str):
-    if to_client in clients_data:
-        translate_meassage(clients_data[to_client].socket_client, f"{from_client}: {message}")
-        translate_meassage(clients_data[from_client].socket_client, f"COMMAND:{SUCCES_SEND}")
+    if to_client in clients_data.values():
+        message_router.route_send_message(from_client, to_client, message)
+        message_router.route_callback(from_client, f"COMMAND:{SUCCES_SEND}")
     else:
-        translate_meassage(clients_data[from_client].socket_client, f"COMMAND:{ERROR_SEND}")
+        message_router.route_callback(from_client, f"COMMAND:{ERROR_SEND}")
         print(f"[error] client {to_client.login} not found")
 
 def start_server():
