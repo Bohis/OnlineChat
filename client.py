@@ -47,6 +47,8 @@ def receive_messages(socket_server:socket.socket):
                 code = int(msg.split(":")[1])
                 if code == SUCCES_AUTHORIZE:
                     authorized = True
+                elif code == ERROR_AUTHORIZE:
+                    authorized = False
                 elif code == ERROR_SEND:
                     print("Error send message")
                     callback = True
@@ -57,7 +59,7 @@ def receive_messages(socket_server:socket.socket):
             
             print(msg)
         except:
-            print("[!] Соединение потеряно.")
+            print("[!] connection lost")
             break    
     
 def start_client():

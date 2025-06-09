@@ -1,16 +1,19 @@
 import socket
 import threading
+from authorize import Authorize_servis
 from client_data import Client
+from messageRouter import MessageRouter
 from config import *
+
+lock = threading.Lock()
+clients_socket = []
+theard_list = []
 
 ip_host, port = load_data_config(PATH_CONFIG)
 clients_data:dict[str, Client] = {client.login:client for client in load_data_clients(PATH_CLIENTS)} 
 
-lock = threading.Lock()
-
-clients_socket = []
-
-theard_list = []
+authorize_handle = Authorize_servis(clients_data)
+message_router = MessageRouter(clients_data)
 
 def disconnect_handle(connection_socket: socket.socket, addres: str):
     print(f"[-] disconnect {addres}")
@@ -20,12 +23,12 @@ def disconnect_handle(connection_socket: socket.socket, addres: str):
         
     connection_socket.close()
 
-def check_authorized(login: str, password: str) -> bool:
-    return login in clients_data and clients_data[login].password == password
-
 def handle_client(connection_socket: socket.socket, addres:str):
     print(f"[+] client try connect {addres}")
+    
     auth_data = ""
+    client = None
+    
     while True:
         try:
             auth_data += connection_socket.recv(1024).decode("utf-8")
@@ -34,12 +37,12 @@ def handle_client(connection_socket: socket.socket, addres:str):
                 
                 login, password = auth_data.split("\n")
                 
-                if check_authorized(login, password):
-                    translate_meassage(connection_socket, f"COMMAND:{ERROR_AUTHORIZE}")
-                    print(f"[-] client {addres} input error login and password")
+                if authorize_handle.check_client_login_and_password(login, password):
+                    message_router.route(connection_socket, f"COMMAND:{ERROR_AUTHORIZE}")
+                    print(f"[-] client {addres} wrong login or password")
                 else:
-                    translate_meassage(connection_socket, f"COMMAND:{SUCCES_AUTHORIZE}")
-                    print(f"[-] client {addres} authorized")
+                    message_router.route(connection_socket, f"COMMAND:{SUCCES_AUTHORIZE}")
+                    print(f"[+] client {addres} authorized")
                     client = clients_data[login]
                     with lock:
                         client.ip = addres
@@ -48,7 +51,8 @@ def handle_client(connection_socket: socket.socket, addres:str):
                 
         except BaseException as error:
             print(f"[error] error input {error}")
-            translate_meassage(connection_socket, "authorized error. Repeat input")
+            message_router.route(connection_socket, "authorized error. Repeat input")
+            
     
     while True:
         data = ""
@@ -57,7 +61,7 @@ def handle_client(connection_socket: socket.socket, addres:str):
                 data += connection_socket.recv(1024).decode("utf-8")
                 if data.endswith("|"):
                     data = data[:-1]
-                    print(f"[+] accept message {data}")
+                    print(f"[+] accept message {repr(data)} from {addres}")
                     break
             except:
                 disconnect_handle(connection_socket, addres)
@@ -72,10 +76,7 @@ def send_mesage_from_client_to_client(from_client:Client, to_client:Client, mess
         translate_meassage(clients_data[from_client].socket_client, f"COMMAND:{SUCCES_SEND}")
     else:
         translate_meassage(clients_data[from_client].socket_client, f"COMMAND:{ERROR_SEND}")
-        print("[error] user not found")
-
-def translate_meassage(to_client:socket.socket, message:str):
-    to_client.send(message.encode())
+        print(f"[error] client {to_client.login} not found")
 
 def start_server():
     socket_chat = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
